@@ -1,0 +1,12 @@
+{
+  "name": "startup-team",
+  "owner": { "name": "mypanda7" },
+  "metadata": { "description": "A project-agnostic expert team for Claude Code that learns across projects." },
+  "plugins": [
+    {
+      "name": "startup-team",
+      "source": "./plugins/startup-team",
+      "description": "A small expert team for any project: tech lead, architect, designer, executor, auditor, devops and security agents, with turn folders, shared memory and an owner-approved learning loop."
+    }
+  ]
+}
