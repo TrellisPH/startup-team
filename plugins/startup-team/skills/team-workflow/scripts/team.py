@@ -13,9 +13,10 @@ Usage:
   team.py memory query <words...>
   team.py memory digest [--for A] [--words w1 w2 ...]
   team.py memory done <id>
-  team.py learn propose --text T --evidence E [--source S]
+  team.py learn propose --text T --evidence E [--source S] [--agent A]
   team.py learn list
   team.py learn decide <id> 1|0
+  team.py learn apply <id> --repo <clone of the team repository>
 """
 import argparse
 import datetime
@@ -190,27 +191,49 @@ def learn_path() -> Path:
 
 
 def private_words() -> list:
+    """Words that must never leave this project: the list the project keeps, plus its own names."""
     p = handoff() / "private-words.txt"
     if not p.exists():
-        return []
-    return [w.strip().lower() for w in p.read_text(encoding="utf-8").splitlines() if w.strip() and not w.startswith("#")]
+        sys.exit(
+            "refused: this project has no .handoff/private-words.txt yet. Create it first, one word "
+            "or phrase per line: the project's name, its domains, hosts, brand terms and people. "
+            "No rule leaves a project before that list exists."
+        )
+    words = [w.strip().lower() for w in p.read_text(encoding="utf-8").splitlines() if w.strip() and not w.startswith("#")]
+    words.append(root().name.lower())
+    try:
+        out = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True)
+        if out.returncode == 0 and out.stdout.strip():
+            words.append(out.stdout.strip().rstrip("/").rsplit("/", 1)[-1].removesuffix(".git").lower())
+    except OSError:
+        pass
+    return sorted({w for w in words if len(w) >= 3})
 
 
-def learn_propose(a) -> None:
-    refuse_secret(a.text)
+def scrub(text: str) -> None:
+    """Refuse text that is not generic enough to be shared across projects."""
+    refuse_secret(text)
     problems = []
-    if EMAIL.search(a.text):
+    if EMAIL.search(text):
         problems.append("an email address")
-    if IPV4.search(a.text):
+    if IPV4.search(text):
         problems.append("an IP address")
-    low = a.text.lower()
+    if re.search(r"https?://|\b[\w-]+\.(com|app|io|net|org|dev|ai|co|website)\b", text, re.I):
+        problems.append("a web address")
+    if re.search(r"[A-Za-z]:\\|/(home|Users)/", text):
+        problems.append("a local file path")
+    low = text.lower()
     problems += [f'the private word "{w}"' for w in private_words() if w in low]
     if problems:
         sys.exit("refused: a shared rule must be generic. It contains " + ", ".join(problems) + ".")
+
+
+def learn_propose(a) -> None:
+    scrub(a.text)
     rows = read(learn_path())
-    row = {"id": next_id(rows, "L"), "date": now(), "source": a.source, "evidence": a.evidence, "text": a.text, "status": "proposed"}
+    row = {"id": next_id(rows, "L"), "date": now(), "source": a.source, "agent": a.agent, "evidence": a.evidence, "text": a.text, "status": "proposed"}
     append(learn_path(), row)
-    print(f"{row['id']} proposed. Put it to the owner as a 1/0 question.")
+    print(f"{row['id']} proposed for [{a.agent}]. Put it to the owner as a 1/0 question.")
 
 
 def learn_state(rows: list) -> dict:
@@ -226,7 +249,7 @@ def learn_state(rows: list) -> dict:
 def learn_list(_a) -> None:
     state = learn_state(read(learn_path()))
     for r in state.values():
-        print(f"{r['id']} [{r['status']}] {r['date']} ({r['source']}): {r['text']}  [evidence: {r['evidence']}]")
+        print(f"{r['id']} [{r['status']}] {r['date']} ({r['source']} -> {r.get('agent', 'all')}): {r['text']}  [evidence: {r['evidence']}]")
     if not state:
         print("no proposals.")
 
@@ -240,8 +263,40 @@ def learn_decide(a) -> None:
     append(learn_path(), {"id": next_id(rows, "L"), "date": now(), "decides": a.id, "status": status})
     print(f"{a.id} {status}.")
     if status == "approved":
-        print("Add this line to LEARNED.md in the startup-team repository, on a branch, as one commit:")
-        print(f"- {datetime.date.today().isoformat()}: {state[a.id]['text']}")
+        print(f"Next: team.py learn apply {a.id} --repo <path to a clone of the startup-team repository>")
+
+
+def learn_apply(a) -> None:
+    """Write an approved rule into a clone of the team repository and bump the plugin version."""
+    rows = read(learn_path())
+    state = learn_state(rows)
+    if a.id not in state:
+        sys.exit(f"no proposal {a.id}.")
+    rule = state[a.id]
+    if rule["status"] != "approved":
+        sys.exit(f"refused: {a.id} is {rule['status']}. Only a rule the owner approved (1) is applied.")
+    scrub(rule["text"])  # checked again: the private-word list may have grown since the proposal
+    repo = Path(a.repo)
+    plugin = repo / "plugins" / "startup-team"
+    learned = plugin / "skills" / "team-workflow" / "LEARNED.md"
+    manifest = plugin / ".claude-plugin" / "plugin.json"
+    if not learned.exists() or not manifest.exists():
+        sys.exit(f"refused: {repo} is not a clone of the startup-team repository.")
+    if repo.resolve() == root().resolve() or str(repo.resolve()).startswith(str(root().resolve()) + "\\"):
+        sys.exit("refused: the team repository must be a separate clone, outside this project.")
+    line = f"- {datetime.date.today().isoformat()} [{rule.get('agent', 'all')}]: {rule['text']}"
+    text = learned.read_text(encoding="utf-8")
+    if rule["text"] in text:
+        sys.exit("already in LEARNED.md.")
+    learned.write_text(text.rstrip("\n") + "\n" + line + "\n", encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    major, minor, patch = (int(x) for x in data["version"].split("."))
+    data["version"] = f"{major}.{minor}.{patch + 1}"
+    manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    append(learn_path(), {"id": next_id(rows, "L"), "date": now(), "decides": a.id, "status": "applied"})
+    print(f"{a.id} written to LEARNED.md; plugin version is now {data['version']}.")
+    print(f"In {repo.as_posix()}: commit both files on a branch named learn/{a.id.lower()} (the message")
+    print("must stay generic too). The owner merges it; the push guard checks it again.")
 
 
 def main() -> None:
@@ -279,7 +334,12 @@ def main() -> None:
     lp.add_argument("--text", required=True)
     lp.add_argument("--evidence", required=True)
     lp.add_argument("--source", default="main")
+    lp.add_argument("--agent", default="all", choices=("all", "tech-lead", "architect", "designer", "executor", "auditor", "devops", "security", "skill-sub"))
     lp.set_defaults(fn=learn_propose)
+    lap = le.add_parser("apply")
+    lap.add_argument("id")
+    lap.add_argument("--repo", required=True)
+    lap.set_defaults(fn=learn_apply)
     le.add_parser("list").set_defaults(fn=learn_list)
     ld = le.add_parser("decide")
     ld.add_argument("id")

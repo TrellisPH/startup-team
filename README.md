@@ -65,14 +65,35 @@ Text that looks like a secret is refused.
 
 ## How the team learns
 
-Day-to-day notes stay in each project. A rule worth sharing is proposed in generic words
-(`team.py learn propose`), the owner answers 1 or 0, and an approved rule is added to
-[LEARNED.md](LEARNED.md) on a branch that the owner merges. Every project picks it up on its next
-plugin update.
+Day-to-day notes stay in each project. A rule worth sharing travels like this:
+
+1. An agent or the main session proposes it in generic words (`team.py learn propose`).
+2. The tool refuses it if it holds a secret, an email, an IP or web address, a local path, the
+   project's own name, or any word in the project's `.handoff/private-words.txt`. No rule leaves a
+   project before that list exists.
+3. The owner answers 1 or 0.
+4. `team.py learn apply` checks the text again, adds one line to
+   [LEARNED.md](plugins/startup-team/skills/team-workflow/LEARNED.md) and raises the plugin version.
+5. The change is committed on a branch that the owner merges. Every project picks it up on its
+   next plugin update, and the main session passes the rules into each agent's brief.
+
+Only that one line leaves the project. Evidence, turn folders, memory and the proposal log stay in
+the project's git-ignored `.handoff/`.
+
+## Keeping projects out of this repository
 
 This repository is public and shared across projects. Nothing about a single project, its owner,
-its users, its hosts or its secrets belongs here. The tool refuses proposals that contain an email
-address, an IP address, a key, or any word listed in the project's `.handoff/private-words.txt`.
+its users, its hosts or its secrets belongs here, in a file or in a commit message.
+
+Maintainers: install the push guard in your clone, and list your projects' private words in a file
+that never leaves your machine.
+
+```bash
+cp tools/pre-push .git/hooks/pre-push
+```
+
+Then write one word or phrase per line into `.git/private-words.txt`. The guard refuses any push
+whose commits (files or messages) contain one of them.
 
 ## Requirements
 

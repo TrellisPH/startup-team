@@ -36,7 +36,8 @@ project's CLAUDE.md and notes, the team's agent files, then any other plugin or 
 9. **Audit.** `auditor`, with the request, the decision block, the answers and the results. FAIL
    items go back to the tech lead. W items go to the owner as one list of 1/0 proposals.
 10. **Ship.** `devops` PROPOSE for any push, merge, deploy or server change. The owner approves each.
-11. **Close.** Record outcomes (below), mark open items done, and when nothing is running and
+11. **Close.** Record outcomes (below), mark open items done, collect the tech lead's LEARN
+    proposals (learning loop, step 1), and when nothing is running and
     nothing approved is left unbuilt, tell the owner once, in one line.
 
 ## Answered-check (before any question goes out)
@@ -61,16 +62,28 @@ After each piece, record how the model choice went so the tech lead picks better
 <turn>/result-<piece>.md --text "<shape> on <agent@model>: green first try | green after N fixes | FAIL"`.
 
 ## Learning loop (how the team gets better across projects)
-1. An agent or you notice a rule worth keeping, seen at least twice.
-2. `team.py learn propose --source <agent> --evidence <turn> --text "<the rule, in generic words>"`.
-   The tool refuses text that carries an email, an address, a key, or a word listed in the
-   project's `.handoff/private-words.txt` (put the project's name, people, domains and hosts there).
-3. Put it to the owner as a 1/0 proposal. `team.py learn decide <id> 1|0`.
-4. An approved rule is added to `LEARNED.md` in a clone of the startup-team repository, on a branch,
-   as one commit. The owner merges it. Projects get it with `claude plugin update`.
+The team repository improves from what projects learn, and only generic rules ever travel there.
 
-The startup-team repository is shared across projects. Nothing about one project, its owner, its
-users, its hosts or its secrets ever goes into it.
+1. **Notice.** Day-to-day notes (`learned` memory entries, audit findings, model outcomes) stay in
+   the project. At the close of every turn, ask the tech lead whether any failure or good outcome
+   has now been seen at least twice. Those become `LEARN:` proposals.
+2. **Propose.** `team.py learn propose --agent <agent | all> --source <who> --evidence <turn>
+   --text "<the rule, in generic words>"`. The tool refuses the text if it holds a secret, an email,
+   an IP or web address, a local path, the project's own name, or any word in the project's
+   `.handoff/private-words.txt`. That file must exist before the first proposal: list the project's
+   name, domains, hosts, brand terms and people in it, one per line.
+3. **Decide.** Put the rule to the owner as a 1/0 proposal, in its final wording.
+   `team.py learn decide <id> 1|0`.
+4. **Apply.** `team.py learn apply <id> --repo <clone of the team repository>` checks the text
+   again, adds the line to `LEARNED.md` and raises the plugin's patch version, so every project
+   receives it on its next `claude plugin update`. Commit those two files on a branch `learn/<id>`
+   with a generic message. The owner merges it. Never push it yourself unless the owner says so.
+5. **Use.** When you load this skill, read `LEARNED.md` beside it and put the lines for an agent
+   (and the `all` lines) into that agent's brief.
+
+Only the rule's one line leaves the project. Its evidence, the turn folder, the memory file and the
+proposal log stay in the project's `.handoff/`. Nothing about one project, its owner, its users, its
+hosts or its secrets ever goes into the team repository, in a file or in a commit message.
 
 ## What stays in the project
 Brand and design rules, the stack, hosting and deploy steps, standing owner decisions and the
