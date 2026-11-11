@@ -38,6 +38,14 @@ claude plugin update startup-team@startup-team
 | `agents/skill-sub` | A read-only helper that answers one narrow question for another agent. |
 | `skills/team-workflow` | The chain for the main session, plus `scripts/team.py`. |
 | `commands/` | `/startup-team:triage`, `:design`, `:audit`, `:learn`. |
+| `hooks/` | The team gate: on every request of 8 words or more it reminds the session to triage with the tech lead first. |
+
+### The team gate
+
+The gate only adds a reminder; it never blocks a prompt. It stays quiet for slash commands, pasted
+terminal output, short replies, and any request that starts with `quick:`. Set
+`STARTUP_TEAM_GATE_OFF=1` to turn it off for a session. It needs Python on the PATH; without one it
+does nothing.
 
 ## How a task runs
 
