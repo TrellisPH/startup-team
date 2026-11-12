@@ -2,8 +2,9 @@
 
 A small expert team for Claude Code, packaged as a plugin. It gives any project the same way of
 working: a tech lead triages every task, a designer gets the owner's approval before any UI is
-built, an architect plans backend pieces, an executor builds one piece at a time, an auditor checks
+built, an architect plans backend pieces, an executor builds one piece at a time, QA tests it the way a user would, an auditor checks
 the result against the owner's own words, and devops proposes anything that leaves the machine.
+Where the host can start sessions (the Claude desktop app), each role runs in its own session.
 
 The team is project-agnostic. Everything specific to a project (brand, stack, hosting, standing
 decisions) stays in that project's `CLAUDE.md`, and the project's rules always win.
@@ -32,18 +33,21 @@ claude plugin update startup-team@startup-team
 | `agents/designer` | PROPOSE, BRIEF and REVIEW modes. No UI is built before the owner's 1. |
 | `agents/architect` | Plans API, data model, auth and job pieces before the build. |
 | `agents/executor` | Builds one piece from a brief. One local commit. Never pushes. |
+| `agents/qa` | Runs the product and walks every case. PASS or FAIL with steps to reproduce. Never fixes. |
 | `agents/auditor` | PASS or FAIL against the owner's request, with evidence it re-ran itself. |
 | `agents/devops` | Read-only analysis, and proposals for every push, deploy or server change. |
 | `agents/security` | Security analysis of the owner's own project. Findings only, no fixes. |
 | `agents/skill-sub` | A read-only helper that answers one narrow question for another agent. |
 | `skills/team-workflow` | The chain for the main session, plus `scripts/team.py`. |
-| `commands/` | `/startup-team:triage`, `:design`, `:audit`, `:learn`. |
+| `commands/` | `/startup-team:triage`, `:design`, `:qa`, `:audit`, `:learn`, `:start-team` (starts the standing sessions). |
+| `sessions/` | The standing briefs for the Tech Lead, Business Analyst and Security sessions. |
 | `hooks/` | The team gate: on every request of 8 words or more it reminds the session to triage with the tech lead first. |
 
 ### The team gate
 
 The gate only adds a reminder; it never blocks a prompt. It stays quiet for slash commands, pasted
-terminal output, short replies, and any request that starts with `quick:`. Set
+terminal output, short replies, any request that starts with `quick:`, and the briefs the team
+sends to its role sessions and standing sessions (they start with `[startup-team:`). Set
 `STARTUP_TEAM_GATE_OFF=1` to turn it off for a session. It needs Python on the PATH; without one it
 does nothing.
 
@@ -54,8 +58,60 @@ does nothing.
 3. Questions go to the owner one at a time, with options and a recommendation. An answer is final.
 4. UI pieces get a design proposal and the owner's 1. Backend pieces get a plan.
 5. The executor builds each piece and commits it locally.
-6. The auditor checks the whole turn. Fixes go back to the tech lead.
-7. Devops proposes the push or deploy. The owner approves it.
+6. QA runs the product and reports bugs with steps. Fixes go back to the tech lead.
+7. The auditor checks the whole turn. Fixes go back to the tech lead.
+8. Devops proposes the push or deploy. The owner approves it.
+
+## Sessions
+
+In a host that can start sessions (the Claude desktop app), the team works in two kinds of session.
+
+- **Standing sessions** are long-lived: one Tech Lead, one Business Analyst and one Security session
+  per project, started once and used for every task.
+- **Role sessions** are opened for one run of a role and end with it, so the owner can open, steer
+  and stop each run on its own.
+
+They fit together like this. A role that has a standing session for the project gets its work by
+message there, and no role session is opened for it. So the tech lead and security use their
+standing session when there is one, and otherwise open a role session like the others. The
+designer, architect, executor, QA, auditor and devops always open a role session. `skill-sub` is
+always a sub-agent, and the Business Analyst is only ever a standing session.
+
+### Standing sessions
+
+`/startup-team:start-team` starts up to three standing sessions in the Claude desktop app's sidebar,
+each from its brief in `sessions/`. Pass `tech-lead`, `business-analyst` or `security` to start only
+those.
+
+| Session | What it does | Main session uses it for |
+|---|---|---|
+| Tech Lead | Triages only: never builds, edits, commits or pushes. | Each request, answered with a decision block. |
+| Business Analyst | Relays questions to the owner one at a time and sends each answer back verbatim. Never answers or decides. | Question batches. |
+| Security | Analysis only: findings by severity, fixes as proposals for the owner. | Security checks. |
+
+A session exists for a role when there is a non-archived session whose `cwd` is the project's folder (compared ignoring case, slash direction and a trailing slash; a worktree or subfolder does not count) and whose title contains the role's title, ignoring case and spaces, found with `list_sessions` and messaged by its session id. A session whose title starts with `[run]` is a role session and never counts as a standing session. The main session
+messages it with `SendMessage`, whoever started it. If more than one session matches a role, the
+command lists them and asks the owner which one to use. The command looks for an
+existing one first and never starts a second, and it starts no other role. Standing sessions never
+write source.
+
+### Role sessions
+
+The main session briefs each role session, waits for it, and reads the file it leaves in the turn
+folder. Follow-ups for the same piece go back to the session that already has the context. Role
+sessions never ask the owner anything themselves: their questions go to the Business Analyst
+session when there is one, and otherwise the main session asks them, one at a time. Approvals come
+to the owner in the main session.
+
+Role sessions share the project's checkout, so only one session that writes source runs at a time;
+the read-only ones may run side by side.
+
+### Without sessions
+
+Without a session tool (the plain CLI), when a session cannot be started, or when the owner says
+"here" or "no sessions", the same chain runs with sub-agents, and the main session asks the owner
+its questions itself, one at a time. In the terminal CLI `/startup-team:start-team` says so and
+does nothing.
 
 ## Shared memory
 

@@ -1,11 +1,11 @@
 ---
 name: team-workflow
-description: How the main session runs the startup-team chain for a task (triage by the tech lead, design approval, plan, build, audit, devops), with turn folders, shared memory, one-at-a-time owner questions and the owner-approved learning loop. Load it at the start of any non-trivial task in a project that uses the startup-team plugin, and whenever you need the team tool (turn folders, memory, learned rules).
+description: How the main session runs the startup-team chain for a task (triage by the tech lead, design approval, plan, build, QA, audit, devops), one session per role, with turn folders, shared memory, one-at-a-time owner questions and the owner-approved learning loop. Load it at the start of any non-trivial task in a project that uses the startup-team plugin, and whenever you need the team tool (turn folders, memory, learned rules).
 ---
 
 # Team workflow (for the main session)
 
-You lead a small expert team for one owner. The agents do the work; you brief them, relay between
+You lead a small expert team for one owner. The agents do the work, each in its own session where the host allows it (see Sessions); you brief them, relay between
 them, talk to the owner and record what was decided.
 
 Order of authority, highest first: the owner's words in this session, recorded owner answers, the
@@ -16,12 +16,16 @@ project's CLAUDE.md and notes, the team's agent files, then any other plugin or 
 1. **Turn folder.** `python <this skill's folder>/scripts/team.py turn new <short-slug>` creates
    `.handoff/<stamp>-<slug>/` in the project and prints its path. Every record of the task goes
    there. `.handoff/` is local and git-ignored.
-2. **Triage.** Spawn `tech-lead` with the owner's request verbatim, the turn folder and
-   `team.py memory digest --words <task words>`. Save its decision block as `decision.md`. Skip
-   triage only for a one-line answer or a pure question.
+2. **Triage.** If there is a Tech Lead session for this project (a non-archived session whose `cwd` is the project's folder (compared ignoring case, slash direction and a trailing slash; a worktree or subfolder does not count) and whose title contains "Tech Lead", ignoring case and spaces, found with `list_sessions` and messaged by its session id), send it the owner's
+   request verbatim, the turn folder and `team.py memory digest --words <task words>` with
+   SendMessage, and wait for its decision block. A session whose title starts with `[run]` is a role session and never counts as a standing session. Otherwise run the `tech-lead` agent with the
+   same three things, in a role session where the host can start one (see Sessions). Save the block as `decision.md` and show it unchanged. Skip triage only for
+   a one-line answer or a pure question.
 3. **Questions.** Run the answered-check (below), then put each open question to the owner ONE AT A
-   TIME, with numbered options and the recommended one first. If the project has a question-relay
-   session, send the whole batch there in one message and let it ask one by one. Record each answer
+   TIME, with numbered options and the recommended one first. If there is a Business Analyst session
+   for this project (found by the rule in "Standing sessions"), send it the whole batch in one message (each question with an id, its options
+   with the recommended one first, a one-line context and any dependency) and let it ask one by one;
+   it relays each answer back. Otherwise ask the owner yourself, one at a time. Record each answer
    at once: `team.py memory add --kind owner-answer --source main --turn <turn> --evidence <id>
    --text "<id> <question> -> <answer verbatim>"`, and append it to `answers.md`.
 4. **Design.** Any UI change: `designer` PROPOSE, its questions to the owner, the proposal, the
@@ -32,13 +36,86 @@ project's CLAUDE.md and notes, the team's agent files, then any other plugin or 
    commit per piece. A BLOCKED piece waits for its answer; it is never built on an assumption.
 7. **Check it yourself.** After a piece that changes a screen, look at it in a real browser at the
    project's breakpoints, check the console, and save `browser-pass.md` in the turn folder.
-8. **Deviation sweep.** Every DEVIATION that touches an owner answer goes to the owner before the audit.
-9. **Audit.** `auditor`, with the request, the decision block, the answers and the results. FAIL
+8. **QA.** `qa`, once the pieces of the turn are built (or per piece when the decision block says
+   so), with the request, the answers, the design brief or plan and the results. It writes
+   `qa-<piece>.md`. BUGS go back to the tech lead as fix tasks; an UNCLEAR goes to the owner.
+9. **Deviation sweep.** Every DEVIATION that touches an owner answer goes to the owner before the audit.
+10. **Audit.** `auditor`, with the request, the decision block, the answers, the results and the QA records. FAIL
    items go back to the tech lead. W items go to the owner as one list of 1/0 proposals.
-10. **Ship.** `devops` PROPOSE for any push, merge, deploy or server change. The owner approves each.
-11. **Close.** Record outcomes (below), mark open items done, collect the tech lead's LEARN
+11. **Ship.** `devops` PROPOSE for any push, merge, deploy or server change. The owner approves each.
+12. **Close.** Record outcomes (below), mark open items done, collect the tech lead's LEARN
     proposals (learning loop, step 1), and when nothing is running and
     nothing approved is left unbuilt, tell the owner once, in one line.
+
+## Sessions
+Two kinds of session can work for the team in a host that can start sessions. Standing sessions are
+long-lived, one per role, and serve every task in the project. Role sessions are opened per run of a
+role and end with it. A role whose standing session exists for the project gets no role session.
+
+### Standing sessions
+`/startup-team:start-team` starts up to three standing sessions in the desktop app's sidebar, from
+the briefs in `sessions/`: Tech Lead, Business Analyst and Security. They work only in the desktop
+app, where a session can start another with `start_session`, list sessions with `list_sessions` and
+talk to any of them with `SendMessage` by session id. In the terminal CLI those tools do not exist,
+so the sub-agents and the main session stay the fallback. Standing sessions never write source.
+
+Find each one the same way: a non-archived session whose `cwd` is the project's folder (compared ignoring case, slash direction and a trailing slash; a worktree or subfolder does not count) and whose title contains the role's title, ignoring case and spaces, found with `list_sessions` and messaged by its session id.
+A session whose title starts with `[run]` is a role session and never counts as a standing session.
+Whoever started it, it is used, and a second one is never started. If more than one session matches a role, list them and ask the owner which one to use; never guess, and start none for that role meanwhile. How the main session uses each:
+- **Tech Lead** ("Tech Lead"): triage goes here. Without one, run the `tech-lead` agent in a role
+  session (below), or as a sub-agent in the fallback.
+- **Business Analyst** ("Business Analyst"): question batches go here. It asks the owner one at a
+  time and relays each answer verbatim; it never answers or decides. Send it WITHDRAW or REPLACES
+  messages when a question changes. Without one, ask the owner yourself, one at a time. It is only
+  ever a standing session: there is no Business Analyst agent or role session.
+- **Security** ("Security"): a security check goes here. Without one, run the `security` agent in a
+  role session (below), or as a sub-agent in the fallback. Its fixes come back as proposals for the
+  owner, never as changes.
+
+### Role sessions: one per role run
+The owner has asked for every role to run in its own session, so each can be opened, steered and
+stopped on its own. Installing this plugin is that standing request: do not ask again per task.
+
+**When.** If this session has a tool that starts a separate session (in the Claude desktop app:
+`start_session`, with initiation `user_asked`), every run of `tech-lead`, `designer`, `architect`,
+`executor`, `qa`, `auditor`, `devops` and `security` goes into its own session instead of a
+sub-agent, except a role that has a standing session for the project: its runs go to that standing
+session by message, and no new one is started. So `tech-lead` and `security` runs go to their
+standing session when one exists and otherwise open a role session like the others; `designer`,
+`architect`, `executor`, `qa`, `auditor` and `devops` always open a role session.
+`skill-sub` stays a sub-agent: its answer is short and its parent needs it at once.
+Fall back to sub-agents, for the whole task, when there is no such tool, when a start is refused,
+or when the owner says "here" or "no sessions". In that fallback the main session also asks the
+owner's questions itself, one at a time.
+
+**The brief.** Start each one fresh (not a fork), with the model the decision block names and the
+title `[run] <role>: <turn slug> <piece>`. The first line of the brief is exactly
+`[startup-team:<role>]` so the team gate stays quiet in that session. Then:
+- "You are the startup-team `<role>`. Read `<absolute path>/agents/<role>.md` and follow it as your
+  instructions for this session. Do not triage, do not start sessions or agents of your own, and do
+  not put questions to the owner: write them in your output file."
+- Everything a sub-agent would get: the request verbatim, the mode, the piece, the decision block,
+  the answers, the memory digest and the LEARNED lines for that role.
+- The absolute path of the turn folder, the file to write there, and "end with one line naming it".
+
+**Where.** Role sessions share this project's checkout (no worktree of their own): `.handoff/` is
+git-ignored, so a separate worktree would not see the turn folder, and the executor's commit has
+to land on the current branch. So only ONE session that writes source runs at a time (one
+`executor` piece, then the next). Sessions that only read source or run it (`tech-lead`,
+`designer`, `architect`, `qa`, `auditor`, `devops` ANALYSE, `security`) may run side by side, but
+never `qa` or `auditor` while an `executor` is still building.
+
+**Getting the result.** The host tells you when a role session ends its turn. Do not poll. Its note
+is a report, not the result: read the file it wrote in the turn folder and carry on from that. A
+follow-up for the same role and piece (an answer to its question, a fix round) goes to the session
+that already has the context, not to a new one. Add one line per session to `sessions.md` in the
+turn folder: role, piece, session id, outcome.
+
+**The owner stays in the main session.** Role sessions never put questions to the owner
+themselves. Their questions go out as in step 3: the batch to the Business Analyst session when
+there is one for the project, otherwise asked here, one at a time. The 1/0 proposals and every
+approval are put to the owner here, as before. If the owner steers a role session directly, read
+its output file again before the next step.
 
 ## Answered-check (before any question goes out)
 For each question, search `.handoff/*/answers.md`, `team.py memory query <topic>`, the project's
